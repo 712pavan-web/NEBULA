@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nubela Rakho • AI Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@500;600&display=swap');
+        
+        :root { --accent: #6366f1; }
+        
+        body { font-family: 'Inter', system_ui, sans-serif; }
+        .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; font-weight: 600; }
+
+        .sidebar { background: linear-gradient(180deg, #18181b 0%, #27251f 100%); }
+        .chat-container { scrollbar-width: thin; scrollbar-color: #3f3f46 #18181b; }
+        .message-bubble { animation: fadeInUp 0.3s ease forwards; }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+        .mini-spinner { width: 18px; height: 18px; border: 2.5px solid #3f3f46; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        .safe-badge { background: linear-gradient(90deg, #166534, #4ade80); color: white; font-size: 10px; padding: 1px 8px; border-radius: 9999px; font-weight: 700; }
+        
+        .chat-message-user { background: linear-gradient(135deg, var(--accent), #4f46e5); color: white; border-radius: 20px 20px 4px 20px; }
+        .chat-message-ai { background-color: #27251f; border: 1px solid #3f3f46; border-radius: 20px 20px 20px 4px; }
+
+        .create-tab.active { background-color: white; color: #18181b; font-weight: 600; }
+
+        .processing-gesture { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .usage-bar { transition: width 0.4s ease; }
+
+        .theme-transition { transition: background-color 0.4s ease, color 0.4s ease, border-color 0.4s ease; }
+
+        .neon-theme { --accent: #a855f7; }
+        .ocean-theme { --accent: #06b6d4; }
+        .sunset-theme { --accent: #f59e0b; }
+        .emerald-theme { --accent: #10b981; }
+
+        .model-card { transition: all 0.2s ease; }
+        .model-card.active { border-color: var(--accent); background-color: #27251f; box-shadow: 0 0 0 1px var(--accent); }
+        .model-card.disabled { opacity: 0.5; cursor: not-allowed; }
+
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; z-index: 50; height: 100vh; transform: translateX(-100%); transition: transform 0.3s ease; }
+            .sidebar.open { transform: translateX(0); }
+            .create-split { grid-template-columns: 1fr !important; }
+            
+            .create-tab { padding-left: 1rem !important; padding-right: 1rem !important; font-size: 0.875rem; min-height: 44px; }
+            
+            #card-preview, #video-result, #model-preview, #map-container { min-height: 220px !important; }
+
+            input, textarea, select { font-size: 16px !important; }
+            
+            .chat-message-user, .chat-message-ai { max-width: 85% !important; font-size: 0.95rem; }
+            
+            .main-content, #create-view { overflow-x: hidden; }
+        }
+        
+        .sidebar-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 40;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .sidebar-backdrop.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        html, body {
+            height: 100%;
+            overscroll-behavior: none;
+        }
+        
+        .chat-container,
+        .overflow-auto,
+        #messages-container,
+        #history-list {
+            overscroll-behavior-y: contain;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
+        }
+        
+        .chat-container::-webkit-scrollbar,
+        .overflow-auto::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-container::-webkit-scrollbar-thumb,
+        .overflow-auto::-webkit-scrollbar-thumb {
+            background-color: #3f3f46;
+            border-radius: 20px;
+        }
+    </style>
+
+    <style>
+        @media(max-width:768px){
+            body{overflow-x:hidden!important}
+            .container,.wrapper,.chat-container{width:100%!important;max-width:100%!important;padding:10px!important}
+            .grid,.cards{display:flex!important;flex-direction:column!important}
+            .card,button,input,textarea,select{width:100%!important;max-width:100%!important}
+            img,video{max-width:100%!important;height:auto!important}
+        }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200 overflow-hidden theme-transition">
+    
+    <div id="onboarding-screen" class="fixed inset-0 bg-zinc-950 z-[100] flex items-center justify-center">
+        <div class="max-w-md w-full mx-4">
+            <div class="text-center mb-8">
+                <div class="w-20 h-20 mx-auto bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 rounded-3xl flex items-center justify-center mb-4">
+                    <i class="fa-solid fa-robot text-white text-5xl"></i>
+                </div>
+                <div class="font-display text-5xl font-semibold tracking-tighter">Nubela Rakho</div>
+                <div class="text-emerald-400 text-sm mt-1">Your safe &amp; creative AI companion</div>
+            </div>
+
+            <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 space-y-3">
+                <button onclick="handleLogin()" class="w-full flex items-center justify-center gap-x-3 bg-white text-zinc-900 font-semibold py-3.5 rounded-3xl hover:bg-zinc-100 transition-all">
+                    <i class="fa-solid fa-sign-in-alt"></i>
+                    <span>Login with Email</span>
+                </button>
+                
+                <button onclick="handleSignUp()" class="w-full flex items-center justify-center gap-x-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 font-semibold py-3.5 rounded-3xl transition-all">
+                    <i class="fa-solid fa-user-plus"></i>
+                    <span>Sign Up (Free)</span>
+                </button>
+                
+                <div class="pt-2">
+                    <button onclick="handleGuestMode()" class="w-full flex items-center justify-center gap-x-3 text-emerald-400 hover:text-emerald-300 font-medium py-3 transition-all">
+                        <i class="fa-solid fa-user-clock"></i>
+                        <span>Continue as Guest (2 Days Free)</span>
+                    </button>
+                    <div class="text-center text-[10px] text-zinc-500 mt-1">No signup needed • Limited features</div>
+                </div>
+            </div>
+            
+            <div class="text-center mt-6 text-xs text-zinc-500">Made for everyone • 100% Safe • No violence or bad content</div>
+        </div>
+    </div>
+
+    <div id="main-app" class="hidden">
+        <div class="md:hidden flex items-center justify-between bg-zinc-900 border-b border-zinc-800 px-4 h-14">
+            <div class="flex items-center gap-x-3">
+                <button onclick="toggleMobileSidebar()" class="w-9 h-9 flex items-center justify-center"><i class="fa-solid fa-bars text-xl"></i></button>
+                <div class="flex items-center gap-x-2">
+                    <div class="w-8 h-8 bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-robot text-white"></i></div>
+                    <div class="font-display text-2xl font-semibold tracking-tighter">Nubela Rakho</div>
+                </div>
+            </div>
+            <div class="safe-badge px-3 py-1 text-xs"><i class="fa-solid fa-shield-halved"></i> SAFE</div>
+        </div>
+
+        <div class="flex h-[calc(100vh-56px)] md:h-screen">
+            <div id="sidebar-backdrop" class="sidebar-backdrop md:hidden" onclick="closeMobileSidebar()"></div>
+            
+            <div id="sidebar" class="w-72 sidebar border-r border-zinc-800 flex flex-col md:relative fixed inset-y-0 left-0 z-50 transform md:transform-none -translate-x-full md:translate-x-0 transition-transform">
+                
+                <div class="hidden md:flex px-6 pt-6 pb-3 items-center gap-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-robot text-white text-2xl"></i></div>
+                    <div>
+                        <div class="font-display text-3xl font-semibold tracking-tighter">Nubela Rakho</div>
+                        <div class="text-[10px] text-emerald-400 -mt-1">SAFE AI</div>
+                    </div>
+                </div>
+
+                <div class="px-4 pt-3 space-y-2">
+                    <button onclick="createNewChat(); closeMobileSidebar()" class="w-full flex justify-center gap-x-2 bg-white text-zinc-900 font-semibold py-3 rounded-3xl text-sm"><i class="fa-solid fa-plus"></i> <span>New Chat</span></button>
+                    <button onclick="showCreateStudio(); closeMobileSidebar()" class="w-full flex justify-center gap-x-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 py-3 rounded-3xl text-sm"><i class="fa-solid fa-magic text-indigo-400"></i> <span>Creates</span></button>
+                </div>
+
+                <div class="px-4 mt-5">
+                    <div class="flex justify-between text-xs mb-1 px-1">
+                        <div class="text-zinc-400">Usage</div>
+                        <div id="usage-text" class="font-mono text-emerald-400">12% • resets in 48m</div>
+                    </div>
+                    <div class="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div id="usage-bar" class="usage-bar h-2 bg-gradient-to-r from-emerald-400 to-teal-400 rounded-full" style="width: 12%"></div>
+                    </div>
+                </div>
+
+                <div class="flex-1 mt-4 px-4 min-h-0 flex flex-col">
+                    <div class="flex justify-between px-1 mb-2 text-xs text-zinc-400"><div>CHAT HISTORY</div></div>
+                    <input id="history-search" onkeyup="filterHistory()" type="text" placeholder="Search..." class="bg-zinc-900 border border-zinc-800 text-sm rounded-2xl px-4 py-2 mb-2 outline-none">
+                    <div id="history-list" class="flex-1 overflow-auto custom-scrollbar space-y-1 text-sm pr-1"></div>
+                </div>
+
+                <div class="p-4 border-t border-zinc-800 mt-auto space-y-2">
+                    <button onclick="showUpgradeModal()" class="w-full text-xs py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-2xl border border-zinc-700">Upgrade <span class="text-amber-400">(Coming Soon)</span></button>
+                    
+                    <div onclick="showSettingsModal()" class="flex items-center gap-x-3 px-3 py-2.5 hover:bg-zinc-800 rounded-2xl cursor-pointer text-sm">
+                        <i class="fa-solid fa-cog text-zinc-400"></i>
+                        <div>Settings &amp; Themes</div>
+                    </div>
+                    
+                    <button onclick="logout()" class="w-full text-xs py-2 text-red-400 hover:bg-zinc-800 rounded-2xl">Logout</button>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col main-content min-h-0">
+                <div class="hidden md:flex h-16 border-b border-zinc-800 bg-zinc-900 px-6 items-center justify-between">
+                    <div class="min-w-0 flex-1 mr-3"><span id="chat-title" class="font-semibold text-xl truncate block">Welcome to Nubela Rakho</span></div>
+                    <div class="flex gap-x-2">
+                        <div class="safe-badge px-3 py-1 text-xs"><i class="fa-solid fa-shield-halved"></i> ALWAYS SAFE</div>
+                        <button onclick="clearCurrentChat()" class="text-xs px-4 py-2 border border-zinc-700 rounded-2xl hover:bg-zinc-800">Clear Chat</button>
+                    </div>
+                </div>
+
+                <div id="main-view" class="flex-1 flex flex-col min-h-0">
+                    
+                    <div id="chat-view" class="flex-1 flex flex-col min-h-0">
+                        <div id="messages-container" class="flex-1 overflow-y-auto p-5 space-y-6 chat-container bg-zinc-950"></div>
+                        <div class="p-4 border-t border-zinc-800 bg-zinc-900">
+                            <div class="max-w-3xl mx-auto flex gap-x-3 bg-zinc-800 border border-zinc-700 rounded-3xl px-2 py-1.5 items-end">
+                                <input type="file" id="chat-file-upload" class="hidden" multiple>
+                                <button onclick="document.getElementById('chat-file-upload').click()" class="w-11 h-11 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-2xl transition-colors shrink-0 mb-0.5">
+                                    <i class="fa-solid fa-plus text-lg"></i>
+                                </button>
+                                
+                                <textarea id="message-input" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}" rows="1" placeholder="Message Nubela Rakho..." class="flex-1 bg-transparent px-2 py-3 text-sm outline-none resize-y max-h-24"></textarea>
+                                
+                                <button onclick="sendMessage()" class="w-11 h-11 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 rounded-2xl shrink-0 mb-0.5"><i class="fa-solid fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="create-view" class="hidden flex-1 flex flex-col bg-zinc-950 min-h-0">
+                        <div class="px-5 pt-4 pb-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900">
+                            <button onclick="showChatView()" class="flex items-center gap-x-2 text-sm px-4 py-2 rounded-2xl hover:bg-zinc-800"><i class="fa-solid fa-arrow-left"></i> <span>Back</span></button>
+                            <div class="font-semibold text-2xl tracking-tight">Create Studio</div>
+                        </div>
+
+                        <div class="px-5 pt-4">
+                            <div class="flex gap-x-1 bg-zinc-900 p-1 rounded-3xl overflow-x-auto w-full md:w-fit text-sm pb-1 snap-x">
+                                <button onclick="switchCreateTab(0)" id="tab-0" class="create-tab active flex-shrink-0 whitespace-nowrap px-5 py-2 font-medium rounded-3xl">Cards</button>
+                                <button onclick="switchCreateTab(1)" id="tab-1" class="create-tab flex-shrink-0 whitespace-nowrap px-5 py-2 font-medium rounded-3xl">Videos</button>
+                                <button onclick="switchCreateTab(2)" id="tab-2" class="create-tab flex-shrink-0 whitespace-nowrap px-5 py-2 font-medium rounded-3xl">Codes</button>
+                                <button onclick="switchCreateTab(3)" id="tab-3" class="create-tab flex-shrink-0 whitespace-nowrap px-5 py-2 font-medium rounded-3xl">Models</button>
+                                <button onclick="switchCreateTab(4)" id="tab-4" class="create-tab flex-shrink-0 whitespace-nowrap px-5 py-2 font-medium rounded-3xl">Maps</button>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 p-5 overflow-auto min-h-0">
+                            <div class="max-w-7xl mx-auto">
+                                
+                                <div id="create-tab-0" class="create-tab-content">
+                                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                        <div class="lg:col-span-5">
+                                            <h3 class="font-semibold text-xl mb-3">Digital Cards</h3>
+                                            <div class="space-y-4">
+                                                <select id="card-type" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-2.5"><option>Birthday Card</option><option>Thank You Card</option><option>Graduation</option></select>
+                                                <div class="flex gap-3"><div onclick="selectCardColor(this,'#6366f1')" class="color-swatch w-10 h-10 rounded-2xl cursor-pointer ring-2 ring-indigo-500 active:scale-95 transition-transform" style="background:#6366f1"></div><div onclick="selectCardColor(this,'#10b981')" class="color-swatch w-10 h-10 rounded-2xl cursor-pointer active:scale-95 transition-transform" style="background:#10b981"></div><div onclick="selectCardColor(this,'#f43f5e')" class="color-swatch w-10 h-10 rounded-2xl cursor-pointer active:scale-95 transition-transform" style="background:#f43f5e"></div></div>
+                                                <textarea id="card-prompt" rows="3" placeholder="A fun birthday card for my best friend" class="w-full bg-zinc-900 border border-zinc-700 rounded-3xl px-4 py-3"></textarea>
+                                                
+                                                <input type="file" id="card-file-upload" class="hidden">
+                                                <button onclick="document.getElementById('card-file-upload').click()" class="w-full flex items-center justify-center gap-x-2 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-sm font-medium transition-colors mt-2">
+                                                    <i class="fa-solid fa-plus"></i> Upload Reference Image
+                                                </button>
+
+                                                <button onclick="generateDigitalCard()" class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl font-semibold">Generate Card</button>
+                                            </div>
+                                        </div>
+                                        <div class="lg:col-span-7">
+                                            <div class="lg:sticky lg:top-4">
+                                                <div class="flex justify-between mb-2"><div class="font-semibold">Preview</div><button onclick="downloadCard()" class="hidden text-xs px-4 py-1.5 border border-zinc-700 rounded-2xl" id="download-card-btn"><i class="fa-solid fa-download"></i> Download PNG</button></div>
+                                                <div id="card-preview" class="min-h-[300px] bg-zinc-900 border border-zinc-700 rounded-3xl p-6 flex items-center justify-center text-sm">Card preview will appear here →</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div id="create-tab-1" class="create-tab-content hidden">
+                                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                        <div class="lg:col-span-5">
+                                            <h3 class="font-semibold text-xl mb-3">Video Script</h3>
+                                            <textarea id="video-prompt" rows="3" placeholder="Educational video about solar system" class="w-full bg-zinc-900 border border-zinc-700 rounded-3xl px-4 py-3 mb-2"></textarea>
+                                            
+                                            <input type="file" id="video-file-upload" class="hidden">
+                                            <button onclick="document.getElementById('video-file-upload').click()" class="w-full flex items-center justify-center gap-x-2 py-2.5 mb-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-sm font-medium transition-colors">
+                                                <i class="fa-solid fa-plus"></i> Upload Script / Notes
+                                            </button>
+
+                                            <button onclick="generateVideoConcept()" class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl font-semibold">Generate Script</button>
+                                        </div>
+                                        <div class="lg:col-span-7">
+                                            <div class="lg:sticky lg:top-4"><div class="font-semibold mb-2">Script <button onclick="downloadVideoScript()" class="ml-2 text-xs px-3 py-1 border border-zinc-700 rounded-2xl">Download .html</button></div><div id="video-result" class="min-h-[300px] bg-zinc-900 border border-zinc-700 rounded-3xl p-5 text-sm">Video script will appear here →</div></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div id="create-tab-2" class="create-tab-content hidden">
+                                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                        <div class="lg:col-span-5">
+                                            <h3 class="font-semibold text-xl mb-3">Generate Code</h3>
+                                            <select id="code-lang" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-2.5 mb-3"><option>HTML + Tailwind</option><option>JavaScript</option><option>Python</option></select>
+                                            <input id="code-prompt" type="text" placeholder="Todo app with local storage" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-2.5 mb-2">
+                                            
+                                            <input type="file" id="code-file-upload" class="hidden">
+                                            <button onclick="document.getElementById('code-file-upload').click()" class="w-full flex items-center justify-center gap-x-2 py-2.5 mb-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-sm font-medium transition-colors">
+                                                <i class="fa-solid fa-plus"></i> Upload Base File (.html, .js)
+                                            </button>
+
+                                            <button onclick="generateCode()" class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl font-semibold">Generate Code</button>
+                                        </div>
+                                        <div class="lg:col-span-7">
+                                            <div class="lg:sticky lg:top-4"><div class="font-semibold mb-2 flex justify-between"><span>Code</span> <button onclick="downloadCode()" class="text-xs px-3 py-1 border border-zinc-700 rounded-2xl">Download</button></div><pre class="min-h-[280px] bg-zinc-900 border border-zinc-700 p-4 rounded-3xl text-xs overflow-auto"><code id="code-output"></code></pre></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div id="create-tab-3" class="create-tab-content hidden">
+                                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                        <div class="lg:col-span-5">
+                                            <h3 class="font-semibold text-xl mb-3">3D Models</h3>
+                                            <textarea id="model-prompt" rows="3" placeholder="Rotating low-poly planet with stars" class="w-full bg-zinc-900 border border-zinc-700 rounded-3xl px-4 py-3 mb-2"></textarea>
+                                            
+                                            <input type="file" id="model-file-upload" class="hidden">
+                                            <button onclick="document.getElementById('model-file-upload').click()" class="w-full flex items-center justify-center gap-x-2 py-2.5 mb-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-sm font-medium transition-colors">
+                                                <i class="fa-solid fa-plus"></i> Upload Reference Image
+                                            </button>
+
+                                            <button onclick="generateModel()" class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl font-semibold">Generate Model</button>
+                                        </div>
+                                        <div class="lg:col-span-7">
+                                            <div class="lg:sticky lg:top-4"><div class="font-semibold mb-2">Preview <button onclick="downloadModel()" class="ml-2 text-xs px-3 py-1 border border-zinc-700 rounded-2xl">Download HTML</button></div><div id="model-preview" class="min-h-[300px] bg-zinc-900 border border-zinc-700 rounded-3xl flex items-center justify-center">3D model preview →</div></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div id="create-tab-4" class="create-tab-content hidden">
+                                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                                        <div class="lg:col-span-5">
+                                            <h3 class="font-semibold text-xl mb-3">Interactive Maps</h3>
+                                            <input id="map-location" type="text" value="Tokyo, Japan" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-2.5 mb-2">
+                                            
+                                            <input type="file" id="map-file-upload" class="hidden">
+                                            <button onclick="document.getElementById('map-file-upload').click()" class="w-full flex items-center justify-center gap-x-2 py-2.5 mb-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl text-sm font-medium transition-colors">
+                                                <i class="fa-solid fa-plus"></i> Upload Locations (.csv, .json)
+                                            </button>
+
+                                            <button onclick="generateMap()" class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-3xl font-semibold">Generate Map</button>
+                                        </div>
+                                        <div class="lg:col-span-7">
+                                            <div class="lg:sticky lg:top-4"><div class="font-semibold mb-2">Map <button onclick="downloadMapData()" class="ml-2 text-xs px-3 py-1 border border-zinc-700 rounded-2xl">Download JSON</button></div><div id="map-container" class="min-h-[320px] bg-zinc-900 border border-zinc-700 rounded-3xl overflow-hidden"></div></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-modal" onclick="if(event.target.id==='settings-modal') hideSettingsModal()" class="hidden fixed inset-0 bg-black/70 z-[110] flex items-center justify-center">
+        <div onclick="event.stopImmediatePropagation()" class="bg-zinc-900 border border-zinc-700 rounded-3xl p-5 sm:p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-5">
+                <div class="font-semibold text-xl">Settings &amp; Themes</div>
+                <button onclick="hideSettingsModal()" class="text-zinc-400 hover:text-white"><i class="fa-solid fa-times text-xl"></i></button>
+            </div>
+            
+            <div class="mb-6">
+                <div class="text-sm font-medium mb-3 text-zinc-400">LIVE THEMES</div>
+                <div class="grid grid-cols-2 gap-2 sm:gap-3">
+                    <button onclick="changeTheme('default')" class="theme-btn flex items-center gap-x-2 sm:gap-x-3 p-3 sm:p-4 rounded-2xl border border-zinc-700 hover:border-indigo-500 transition-all active:scale-[0.985]">
+                        <div class="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl"></div>
+                        <div><div class="font-medium text-sm sm:text-base">Default Dark</div></div>
+                    </button>
+                    <button onclick="changeTheme('neon')" class="theme-btn flex items-center gap-x-2 sm:gap-x-3 p-3 sm:p-4 rounded-2xl border border-zinc-700 hover:border-purple-500 transition-all active:scale-[0.985]">
+                        <div class="w-8 h-8 bg-gradient-to-br from-purple-500 to-fuchsia-500 rounded-xl"></div>
+                        <div><div class="font-medium text-sm sm:text-base">Neon Purple</div></div>
+                    </button>
+                    <button onclick="changeTheme('ocean')" class="theme-btn flex items-center gap-x-2 sm:gap-x-3 p-3 sm:p-4 rounded-2xl border border-zinc-700 hover:border-cyan-500 transition-all active:scale-[0.985]">
+                        <div class="w-8 h-8 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-xl"></div>
+                        <div><div class="font-medium text-sm sm:text-base">Ocean Blue</div></div>
+                    </button>
+                    <button onclick="changeTheme('sunset')" class="theme-btn flex items-center gap-x-2 sm:gap-x-3 p-3 sm:p-4 rounded-2xl border border-zinc-700 hover:border-amber-500 transition-all active:scale-[0.985]">
+                        <div class="w-8 h-8 bg-gradient-to-br from-orange-500 to-amber-500 rounded-xl"></div>
+                        <div><div class="font-medium text-sm sm:text-base">Sunset Orange</div></div>
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <div class="text-sm font-medium mb-3 text-zinc-400">MODEL SELECTION</div>
+                
+                <div class="space-y-3">
+                    <div onclick="selectModel('nubela-1.5')" class="model-card flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-2xl border border-zinc-700 cursor-pointer hover:border-indigo-500" id="model-nubela-1.5">
+                        <div class="flex items-center gap-x-3">
+                            <div class="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center"><i class="fa-solid fa-bolt text-white"></i></div>
+                            <div>
+                                <div class="font-semibold">Nubela 1.5 <span class="text-xs px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">INSTANT</span></div>
+                                <div class="text-xs text-zinc-400">Fast responses • Great for daily use</div>
+                            </div>
+                        </div>
+                        <div class="text-emerald-400 text-xs font-medium">HIGH SPEED</div>
+                    </div>
+
+                    <div onclick="selectModel('nubela-2.5')" class="model-card flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-2xl border border-zinc-700 cursor-pointer hover:border-indigo-500" id="model-nubela-2.5">
+                        <div class="flex items-center gap-x-3">
+                            <div class="w-9 h-9 bg-indigo-500 rounded-xl flex items-center justify-center"><i class="fa-solid fa-brain text-white"></i></div>
+                            <div>
+                                <div class="font-semibold">Nubela 2.5 <span class="text-xs px-2 py-0.5 bg-indigo-500/20 text-indigo-400 rounded">PRO</span></div>
+                                <div class="text-xs text-zinc-400">Advanced reasoning • Best quality</div>
+                            </div>
+                        </div>
+                        <div class="text-indigo-400 text-xs font-medium">RECOMMENDED</div>
+                    </div>
+
+                    <div onclick="selectModel('nubela-3.5')" class="model-card flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-4 rounded-2xl border border-zinc-700 cursor-not-allowed opacity-60" id="model-nubela-3.5">
+                        <div class="flex items-center gap-x-3">
+                            <div class="w-9 h-9 bg-amber-500 rounded-xl flex items-center justify-center"><i class="fa-solid fa-rocket text-white"></i></div>
+                            <div>
+                                <div class="font-semibold">Nubela 3.5 <span class="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded">UPGRADE</span></div>
+                                <div class="text-xs text-zinc-400">Next generation model</div>
+                            </div>
+                        </div>
+                        <div class="text-amber-400 text-xs font-medium">COMING SOON</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="upgrade-modal" onclick="if(event.target.id==='upgrade-modal') hideUpgradeModal()" class="hidden fixed inset-0 bg-black/70 z-[110] flex items-center justify-center">
+        <div onclick="event.stopImmediatePropagation()" class="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 sm:p-8 w-full max-w-sm mx-4 text-center">
+            <i class="fa-solid fa-rocket text-4xl text-amber-400 mb-4"></i>
+            <div class="text-2xl font-semibold mb-2">Upgrade to Pro</div>
+            <div class="text-zinc-400 mb-6">Unlock Nubela 3.5 + Unlimited usage</div>
+            <div class="px-6 py-3 bg-amber-500 text-black font-bold rounded-3xl mb-3">Coming Soon!</div>
+            <button onclick="hideUpgradeModal()" class="text-sm text-zinc-400">Maybe later</button>
+        </div>
+    </div>
+
+    <script>
+        // ==================== CONFIG ====================
+        const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+        
+        // ==================== 👇 ONLY PUT YOUR GROQ API KEY HERE ====================
+        const GROQ_API_KEY = "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";
+
+        let chats = [];
+        let currentChatId = null;
+        let currentCardColor = '#6366f1';
+        let leafletMap = null;
+        let currentCode = '';
+        let currentUser = null;
+        let currentTheme = 'default';
+        let currentModel = 'nubela-2.5';
+
+        const MODEL_MAP = {
+            'nubela-1.5': 'llama-3.1-8b-instant',
+            'nubela-2.5': 'llama-3.3-70b-versatile',
+            'nubela-3.5': 'llama-3.3-70b-versatile'
+        };
+
+        const SYSTEM_PROMPT = `You are Nubela Rakho, a kind, fun and safe AI assistant for all ages. Never discuss violence, inappropriate or harmful topics. Stay positive.`;
+
+        // ==================== USAGE ====================
+        function getUsage() {
+            let u = JSON.parse(localStorage.getItem('nubela_usage') || '{"percent":12,"lastReset":' + Date.now() + '}');
+            if ((Date.now() - u.lastReset) / 3600000 >= 1) { u.percent = 0; u.lastReset = Date.now(); localStorage.setItem('nubela_usage', JSON.stringify(u)); }
+            return u;
+        }
+        function updateUsage(add = 0.1) {
+            let u = getUsage(); u.percent = Math.min(100, u.percent + add); localStorage.setItem('nubela_usage', JSON.stringify(u)); renderUsageBar();
+        }
+        function renderUsageBar() {
+            const u = getUsage();
+            const bar = document.getElementById('usage-bar');
+            const txt = document.getElementById('usage-text');
+            if (bar && txt) {
+                bar.style.width = u.percent + '%';
+                const min = Math.max(0, Math.floor(60 - ((Date.now() - u.lastReset) / 60000)));
+                txt.innerHTML = `${u.percent.toFixed(1)}% • resets in ${min}m`;
+            }
+        }
+
+        // ==================== MODEL SELECTION ====================
+        function selectModel(model) {
+            if (model === 'nubela-3.5') { showUpgradeModal(); return; }
+            currentModel = model;
+            localStorage.setItem('nubela_model', model);
+            document.querySelectorAll('.model-card').forEach(el => el.classList.remove('active', 'border-indigo-500'));
+            document.getElementById(`model-${model}`).classList.add('active', 'border-indigo-500');
+        }
+
+        function loadModel() {
+            const saved = localStorage.getItem('nubela_model') || 'nubela-2.5';
+            currentModel = saved;
+            setTimeout(() => {
+                const el = document.getElementById(`model-${saved}`);
+                if (el) el.classList.add('active', 'border-indigo-500');
+            }, 500);
+        }
+
+        // ==================== THEME ====================
+        function changeTheme(theme) {
+            const body = document.body;
+            body.classList.remove('neon-theme', 'ocean-theme', 'sunset-theme', 'emerald-theme');
+            if (theme === 'neon') body.classList.add('neon-theme');
+            else if (theme === 'ocean') body.classList.add('ocean-theme');
+            else if (theme === 'sunset') body.classList.add('sunset-theme');
+            else if (theme === 'emerald') body.classList.add('emerald-theme');
+            currentTheme = theme;
+            localStorage.setItem('nubela_theme', theme);
+        }
+
+        function loadTheme() {
+            const saved = localStorage.getItem('nubela_theme') || 'default';
+            if (saved !== 'default') changeTheme(saved);
+        }
+
+        // ==================== AUTH ====================
+        function handleLogin() { const email = prompt("Enter email:"); if (email) { currentUser = {type:'user', email}; localStorage.setItem('nubela_user', JSON.stringify(currentUser)); startApp(); } }
+        function handleSignUp() { const name = prompt("Your name:"); if (name) { currentUser = {type:'user', name}; localStorage.setItem('nubela_user', JSON.stringify(currentUser)); startApp(); } }
+        function handleGuestMode() { currentUser = {type:'guest', joined: Date.now(), expires: Date.now() + (2*24*60*60*1000)}; localStorage.setItem('nubela_user', JSON.stringify(currentUser)); startApp(); }
+        function checkUser() {
+            const s = localStorage.getItem('nubela_user');
+            if (s) {
+                currentUser = JSON.parse(s);
+                if (currentUser.type === 'guest' && Date.now() > currentUser.expires) { alert("Guest time over."); localStorage.removeItem('nubela_user'); return false; }
+                return true;
+            }
+            return false;
+        }
+        function logout() { if(confirm("Logout?")) { localStorage.removeItem('nubela_user'); location.reload(); } }
+        function startApp() { document.getElementById('onboarding-screen').classList.add('hidden'); document.getElementById('main-app').classList.remove('hidden'); initializeApp(); }
+
+        // ==================== MOBILE ====================
+        function toggleMobileSidebar() {
+            const sb = document.getElementById('sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            const isOpen = sb.classList.contains('open');
+            
+            if (isOpen) {
+                sb.classList.remove('open');
+                sb.classList.add('-translate-x-full');
+                if (backdrop) backdrop.classList.remove('show');
+            } else {
+                sb.classList.add('open');
+                sb.classList.remove('-translate-x-full');
+                if (backdrop) backdrop.classList.add('show');
+            }
+        }
+        function closeMobileSidebar() {
+            const sb = document.getElementById('sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            if (window.innerWidth < 768) {
+                sb.classList.remove('open');
+                sb.classList.add('-translate-x-full');
+                if (backdrop) backdrop.classList.remove('show');
+            }
+        }
+
+        function initializeApp() {
+            loadFromLocalStorage();
+            renderHistoryList();
+            renderUsageBar();
+            setInterval(renderUsageBar, 30000);
+            loadTheme();
+            loadModel();
+            
+            if (chats.length === 0) createNewChat();
+            else { currentChatId = chats[0].id; renderMessages(); }
+        }
+
+        // ==================== CHAT + AUTO SCROLL ====================
+        function createNewChat() {
+            const nc = {id: Date.now().toString(36), title: "New Chat", messages: [], timestamp: Date.now()};
+            chats.unshift(nc); currentChatId = nc.id; saveToLocalStorage(); renderHistoryList(); showChatView(); renderMessages();
+            setTimeout(() => addWelcomeMessage(), 300);
+        }
+        function addWelcomeMessage() {
+            const ch = chats.find(c => c.id === currentChatId);
+            if (ch && ch.messages.length === 0) {
+                ch.messages.push({role:"assistant", content: "Hi! I'm Nubela Rakho 👋 What would you like to create today?"});
+                saveToLocalStorage(); renderMessages();
+            }
+        }
+        function renderHistoryList() {
+            const c = document.getElementById('history-list'); c.innerHTML = '';
+            chats.forEach(chat => {
+                const d = document.createElement('div');
+                d.className = `px-3 py-2 rounded-2xl hover:bg-zinc-800 flex justify-between text-sm cursor-pointer ${currentChatId===chat.id?'bg-zinc-800':''}`;
+                d.innerHTML = `<div onclick="switchToChat('${chat.id}')"><div class="truncate">${chat.title||'Chat'}</div><div class="text-[10px] text-zinc-500">${new Date(chat.timestamp).toLocaleDateString()}</div></div>
+                <button onclick="event.stopImmediatePropagation();deleteChat('${chat.id}')" class="text-red-400 px-1"><i class="fa-solid fa-trash text-xs"></i></button>`;
+                c.appendChild(d);
+            });
+        }
+        function switchToChat(id){ currentChatId = id; renderHistoryList(); showChatView(); renderMessages(); }
+        function deleteChat(id){ chats=chats.filter(c=>c.id!==id); if(currentChatId===id) currentChatId=chats[0]?.id; saveToLocalStorage(); renderHistoryList(); if(currentChatId) switchToChat(currentChatId); }
+        function clearAllChats(){ if(confirm("Clear all?")){chats=[];currentChatId=null;saveToLocalStorage();renderHistoryList();createNewChat();} }
+        function clearCurrentChat(){ const ch=chats.find(c=>c.id===currentChatId); if(ch){ch.messages=[];saveToLocalStorage();renderMessages();} }
+
+        function renderMessages() {
+            const cont = document.getElementById('messages-container'); cont.innerHTML = '';
+            const ch = chats.find(c => c.id === currentChatId);
+            if (!ch || ch.messages.length === 0) { cont.innerHTML = `<div class="h-full flex items-center justify-center text-zinc-500">Start chatting with Nubela Rakho!</div>`; return; }
+            ch.messages.forEach(m => {
+                const d = document.createElement('div');
+                d.className = `flex ${m.role==='user'?'justify-end':'justify-start'} message-bubble`;
+                if (m.role === 'user') d.innerHTML = `<div class="max-w-[75%] chat-message-user px-4 py-2.5 text-sm">${m.content}</div>`;
+                else d.innerHTML = `<div class="max-w-[80%] flex gap-3"><div class="w-7 h-7 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center"><i class="fa-solid fa-robot text-white text-xs"></i></div><div class="chat-message-ai px-4 py-3 text-sm">${m.content.replace(/\n/g,'<br>')}</div></div>`;
+                cont.appendChild(d);
+            });
+            cont.scrollTop = cont.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const inp = document.getElementById('message-input'); const txt = inp.value.trim();
+            if (!txt || !currentChatId) return;
+            const ch = chats.find(c => c.id === currentChatId);
+            ch.messages.push({role:"user", content:txt});
+            if (ch.messages.length === 1) ch.title = txt.substring(0,35);
+            saveToLocalStorage(); renderHistoryList(); renderMessages(); inp.value = "";
+            updateUsage(0.1);
+            
+            const cont = document.getElementById('messages-container');
+            const thinking = document.createElement('div');
+            thinking.id = 'thinking';
+            thinking.innerHTML = `<div class="flex px-1"><div class="flex gap-3"><div class="w-7 h-7 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center processing-gesture"><i class="fa-solid fa-robot text-white text-xs"></i></div><div class="bg-zinc-800 px-4 py-2.5 rounded-3xl text-sm flex items-center gap-2">Nubela Rakho is thinking <span class="flex gap-1 ml-2"><span class="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"></span><span class="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style="animation-delay:150ms"></span></span></div></div></div>`;
+            cont.appendChild(thinking);
+            cont.scrollTop = cont.scrollHeight;
+
+            try {
+                const res = await callGroq([{role:"system", content: SYSTEM_PROMPT}, ...ch.messages], false);
+                thinking.remove();
+                ch.messages.push({role:"assistant", content: res});
+                saveToLocalStorage(); renderMessages();
+            } catch(e) { thinking.remove(); alert("Error generating response. Please check your API key in the code."); }
+        }
+
+        // Updated global callGroq with custom Native JSON mode feature
+        async function callGroq(messages, jsonMode = false) {
+            if (!GROQ_API_KEY || GROQ_API_KEY.length < 20) {
+                alert("Groq API key missing ya galat hai! Code mein top pe sahi key daalo.");
+                throw new Error("API key nahi hai");
+            }
+            const modelToUse = MODEL_MAP[currentModel] || 'llama-3.3-70b-versatile';
+            
+            const requestBody = {
+                model: modelToUse,
+                messages: messages,
+                temperature: 0.7,
+                max_tokens: 2500
+            };
+            
+            if (jsonMode) {
+                requestBody.response_format = { type: "json_object" };
+            }
+
+            const res = await fetch(GROQ_API_URL, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${GROQ_API_KEY}`
+                },
+                body: JSON.stringify(requestBody)
+            });
+            
+            const data = await res.json();
+            if (data.error) {
+                throw new Error(data.error.message || "Groq API Error");
+            }
+            return data.choices[0].message.content;
+        }
+
+        // ==================== ROBUST JSON PARSER ====================
+        function safeParseJSON(text) {
+            if (!text) throw new Error("Empty response from AI");
+            try {
+                let cleaned = text
+                    .replace(/```json\s*/gi, '')
+                    .replace(/```\s*/g, '')
+                    .trim();
+                
+                const jsonMatch = cleaned.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+                if (jsonMatch) {
+                    return JSON.parse(jsonMatch[1]);
+                }
+                return JSON.parse(cleaned);
+            } catch (e) {
+                console.error("JSON Parse Error. Raw AI response:", text);
+                throw new Error("AI ne sahi JSON format nahi diya. Ek baar dobara generate karein.");
+            }
+        }
+
+        // ==================== CREATE + DOWNLOAD ====================
+        function showCreateStudio() { document.getElementById('chat-view').classList.add('hidden'); document.getElementById('create-view').classList.remove('hidden'); switchCreateTab(0); }
+        function showChatView() { document.getElementById('create-view').classList.add('hidden'); document.getElementById('chat-view').classList.remove('hidden'); }
+        function switchCreateTab(i) {
+            document.querySelectorAll('.create-tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.create-tab').forEach(el => el.classList.remove('active','bg-white','text-zinc-900'));
+            document.getElementById(`create-tab-${i}`).classList.remove('hidden');
+            document.getElementById(`tab-${i}`).classList.add('active','bg-white','text-zinc-900');
+        }
+        function selectCardColor(el, color) { document.querySelectorAll('.color-swatch').forEach(e => e.classList.remove('ring-2','ring-indigo-500')); el.classList.add('ring-2','ring-indigo-500'); currentCardColor = color; }
+
+        async function generateDigitalCard() {
+            const prompt = document.getElementById('card-prompt').value.trim();
+            const prev = document.getElementById('card-preview');
+            if (!prompt) return alert("Describe the card");
+            prev.innerHTML = `<div class="flex justify-center py-10"><div class="mini-spinner"></div></div>`;
+            try {
+                const res = await callGroq([
+                    { role: "system", content: "You must return a valid JSON object. Strictly follow this format: {\"title\": \"string\", \"message\": \"string\", \"footer\": \"string\", \"emoji\": \"string\"}" },
+                    { role: "user", content: `Create ${document.getElementById('card-type').value} about: ${prompt}` }
+                ], true);
+                
+                const data = safeParseJSON(res);
+                prev.innerHTML = `<div id="card-render" class="max-w-md mx-auto rounded-3xl p-8 text-white" style="background:linear-gradient(135deg,${currentCardColor} 0%,#1e2937 100%)"><div class="text-6xl mb-6">${data.emoji || '🎉'}</div><div class="text-3xl font-bold tracking-tighter mb-6">${data.title || 'Special Card'}</div><div class="text-[15px] leading-relaxed">${data.message || ''}</div><div class="mt-8 flex justify-between text-sm"><span>${data.footer || ''}</span><span class="text-xs bg-white/20 px-4 py-1 rounded-2xl">Nubela Rakho</span></div></div>`;
+                document.getElementById('download-card-btn').classList.remove('hidden');
+                window.lastCardData = data;
+                updateUsage(0.5);
+            } catch(e){ 
+                console.error(e);
+                prev.innerHTML = `<div class="text-red-400 p-4 text-sm">Card generate nahi ho paya 😢<br><small>${e.message}</small></div>`; 
+            }
+        }
+        
+        function downloadCard() {
+            const el = document.getElementById('card-render');
+            if (!el) return;
+            html2canvas(el).then(canvas => {
+                const a = document.createElement('a');
+                a.download = 'nubela-rakho-card.png';
+                a.href = canvas.toDataURL();
+                a.click();
+            });
+        }
+
+        async function generateVideoConcept() {
+            const p = document.getElementById('video-prompt').value.trim();
+            const r = document.getElementById('video-result');
+            if (!p) return alert("Please enter a prompt!");
+            r.innerHTML = `<div class="flex justify-center py-10"><div class="mini-spinner"></div></div>`;
+            try {
+                const res = await callGroq([
+                    { role: "system", content: "You must return a valid JSON object. Strictly follow this structure: {\"title\": \"String\", \"description\": \"String\", \"script\": [{\"scene\": 1, \"narration\": \"String\", \"visuals\": \"String\"}]}" },
+                    { role: "user", content: `Create an educational video script layout about: ${p}` }
+                ], true);
+                
+                const data = safeParseJSON(res);
+                let html = `<b>${data.title || 'Untitled Video'}</b><br>${data.description || ''}<br><br>`;
+                
+                if (data.script && Array.isArray(data.script)) {
+                    data.script.forEach(s => {
+                        html += `<b>Scene ${s.scene || ''}</b>:<br><b>Narration:</b> ${s.narration || ''}<br><b>Visuals:</b> ${s.visuals || ''}<br><br>`;
+                    });
+                } else {
+                    html += "Script formatting failed.";
+                }
+                
+                r.innerHTML = html;
+                window.lastVideoData = data;
+                updateUsage(0.5);
+            } catch(e){ 
+                console.error(e);
+                r.innerHTML = `<div class="text-red-400 p-4 text-sm">Video script nahi bana 😢<br><small>${e.message}</small></div>`; 
+            }
+        }
+        
+        function downloadVideoScript() {
+            if (!window.lastVideoData) return;
+            const data = window.lastVideoData;
+            let htmlContent = `<!DOCTYPE html><html><head><title>${data.title || 'Video Script'}</title><style>body { font-family: system-ui; background: #111; color: #ddd; padding: 40px; max-width: 800px; margin: auto; } h1 { color: #fff; } .scene { background: #1a1a1a; padding: 20px; margin: 15px 0; border-radius: 12px; border-left: 4px solid #6366f1; }</style></head><body><h1>${data.title || 'Untitled'}</h1><p>${data.description || ''}</p><h2>Storyboard</h2>`;
+            data.script?.forEach(s => { htmlContent += `<div class="scene"><strong>Scene ${s.scene}</strong><br><strong>Narration:</strong> ${s.narration}<br><strong>Visuals:</strong> ${s.visuals || ''}</div>`; });
+            htmlContent += `</body></html>`;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([htmlContent], {type:'text/html'}));
+            a.download = 'nubela-rakho-video.html';
+            a.click();
+        }
+
+        async function generateCode() {
+            const p = document.getElementById('code-prompt').value.trim();
+            const out = document.getElementById('code-output');
+            if (!p) return alert("Please enter a prompt!");
+            out.textContent = "Generating...";
+            try {
+                const res = await callGroq([
+                    { role: "system", content: "You must return a valid JSON object. Format: {\"code\": \"string values containing pure raw code without any markdown triple backtick formatting wrapper blocks.\", \"explanation\": \"string\"}" },
+                    { role: "user", content: `Write ${document.getElementById('code-lang').value} for: ${p}` }
+                ], true);
+                
+                const data = safeParseJSON(res);
+                currentCode = data.code || "";
+                out.textContent = data.code || "No code found.";
+                updateUsage(0.5);
+            } catch(e){ 
+                console.error(e);
+                out.textContent = "Code generate nahi ho paya 😢 " + e.message; 
+            }
+        }
+        
+        function downloadCode() {
+            if (!currentCode) return;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([currentCode], {type:'text/plain'}));
+            a.download = 'nubela-rakho-code.txt';
+            a.click();
+        }
+
+        async function generateModel() {
+            const p = document.getElementById('model-prompt').value.trim();
+            const prev = document.getElementById('model-preview');
+            if (!p) return alert("Please enter a prompt!");
+            prev.innerHTML = `<div class="flex justify-center py-10"><div class="mini-spinner"></div></div>`;
+            try {
+                const res = await callGroq([
+                    { role: "system", content: "You must return a valid JSON object. Format: {\"html_code\": \"string containing pure standalone HTML code with CSS keyframe rotations/animations, make sure to escape internal double quotes properly using backslashes.\"}" },
+                    { role: "user", content: `Create a beautiful 3D rotating object component using HTML/CSS only for: ${p}. Do not include markdown code blocks inside the string values.` }
+                ], true);
+                
+                const data = safeParseJSON(res);
+                prev.innerHTML = data.html_code || "No component code found.";
+                window.lastModelHTML = data.html_code;
+                updateUsage(0.5);
+            } catch(e){ 
+                console.error(e);
+                prev.innerHTML = `<div class="text-red-400 p-4 text-sm">3D Model nahi bana 😢<br><small>${e.message}</small></div>`; 
+            }
+        }
+        
+        function downloadModel() {
+            if (!window.lastModelHTML) return;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([window.lastModelHTML], {type:'text/html'}));
+            a.download = 'nubela-rakho-model.html';
+            a.click();
+        }
+
+        async function generateMap() {
+            const loc = document.getElementById('map-location').value.trim();
+            const cont = document.getElementById('map-container');
+            cont.innerHTML = `<div class="flex h-full items-center justify-center"><div class="mini-spinner"></div></div>`;
+            try {
+                const res = await callGroq([
+                    { role: "system", content: "You must return a valid JSON object containing an array of POIs under the key 'pois'. Format: {\"pois\": [{\"name\":\"Eiffel Tower\",\"lat\":48.85,\"lng\":2.29}]}" },
+                    { role: "user", content: `POIs in ${loc}` }
+                ], true);
+                
+                const parsedData = safeParseJSON(res);
+                const pois = parsedData.pois || parsedData;
+                if (!Array.isArray(pois)) throw new Error("AI ne array list return nahi kiya.");
+                if (leafletMap) leafletMap.remove();
+                
+                const centerLat = pois[0]?.lat || 35.68;
+                const centerLng = pois[0]?.lng || 139.65;
+                leafletMap = L.map(cont).setView([centerLat, centerLng], 12);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMap);
+                
+                pois.forEach(p => {
+                    if (p.lat && p.lng) L.marker([p.lat, p.lng]).addTo(leafletMap).bindPopup(p.name || 'POI');
+                });
+                window.lastMapData = pois;
+                updateUsage(0.5);
+            } catch(e){ 
+                console.error(e);
+                cont.innerHTML = `<div class="p-6 text-red-400 text-sm">Map nahi bana 😢<br><small>${e.message}</small></div>`; 
+            }
+        }
+        
+        function downloadMapData() {
+            if (!window.lastMapData) return;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(window.lastMapData,null,2)], {type:'application/json'}));
+            a.download = 'nubela-rakho-map.json';
+            a.click();
+        }
+
+        // ==================== MODALS ====================
+        function showSettingsModal() { 
+            document.getElementById('settings-modal').classList.remove('hidden'); 
+            document.getElementById('settings-modal').classList.add('flex'); 
+            document.querySelectorAll('.model-card').forEach(el => el.classList.remove('active', 'border-indigo-500'));
+            const currentEl = document.getElementById(`model-${currentModel}`);
+            if (currentEl) currentEl.classList.add('active', 'border-indigo-500');
+        }
+        function hideSettingsModal() { const m = document.getElementById('settings-modal'); m.classList.remove('flex'); m.classList.add('hidden'); }
+        function showUpgradeModal() { document.getElementById('upgrade-modal').classList.remove('hidden'); document.getElementById('upgrade-modal').classList.add('flex'); }
+        function hideUpgradeModal() { const m = document.getElementById('upgrade-modal'); m.classList.remove('flex'); m.classList.add('hidden'); }
+
+        function filterHistory() {
+            const term = document.getElementById('history-search').value.toLowerCase();
+            document.querySelectorAll('#history-list > div').forEach(d => d.style.display = d.textContent.toLowerCase().includes(term) ? '' : 'none');
+        }
+
+        function loadFromLocalStorage() {
+            const s = localStorage.getItem('nubela_chats');
+            if (s) chats = JSON.parse(s);
+        }
+        function saveToLocalStorage() {
+            localStorage.setItem('nubela_chats', JSON.stringify(chats));
+        }
+
+        // Boot
+        window.onload = function() {
+            if (checkUser()) {
+                document.getElementById('onboarding-screen').classList.add('hidden');
+                document.getElementById('main-app').classList.remove('hidden');
+                initializeApp();
+            }
+        };
+    </script>
+</body>
+</html>
